@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"payproxy/internal"
+	"strings"
 )
 
 type subscribePayload struct {
@@ -24,20 +25,43 @@ func errorHandler(err error) {
 	}
 }
 
+func checkFlags(proxyServer, targetServer, trackPath, secret string) error {
+	err := []string{}
+	if len(proxyServer) == 0 {
+		err = append(err, "-proxy tag is mandatory")
+	}
+	if len(targetServer) == 0 {
+		err = append(err, "-target tag is mandatory")
+	}
+	if len(trackPath) == 0 {
+		err = append(err, "-path tag is mandatory")
+	}
+	if len(secret) == 0 {
+		err = append(err, "-secret tag is mandatory")
+	}
+	if len(err) > 0 {
+		joined := strings.Join(err, ",\n")
+		return fmt.Errorf("%s%s", joined, ".\n type -h for help")
+	}
+	return nil
+}
+
 func main() {
-	proxyServer := flag.String("proxy", "", "the address of the proxy server")
-	mirrorServer := flag.String("mirror", "", "the address of the mirror server")
+	proxyServer := flag.String("proxy", "", "the uri of the proxy server")
+	targetServer := flag.String("target", "", "the uri of the target server")
+	trackPath := flag.String("path", "", "the path to listen")
+	secret := flag.String("secret", "", "the proxy secret password")
 
 	flag.Parse()
-
-	if len(*proxyServer) == 0 {
-		log.Fatal("the address of the proxy server has to be provided with the -proxy tag")
+	if err := checkFlags(*proxyServer, *targetServer, *trackPath, *secret); err != nil {
+		log.Fatal(err)
 	}
 
-	// Connexion au serveur
 	conn, err := net.Dial("tcp", *proxyServer)
+	defer conn.Close()
+
 	errorHandler(err)
-	sp := subscribePayload{Key: "abcdef", Url: "/yo/man"}
+	sp := subscribePayload{Key: *secret, Url: *trackPath}
 	if err = json.NewEncoder(conn).Encode(sp); err != nil {
 		log.Fatal(err)
 	}
@@ -57,7 +81,7 @@ func main() {
 		var buffer bytes.Buffer
 		buffer.Write(r.Body)
 		reader := io.Reader(&buffer)
-		url := fmt.Sprintf("%s%s", *mirrorServer, r.Url)
+		url := fmt.Sprintf("%s%s", *targetServer, r.Url)
 		if len(r.Params) > 0 {
 			url = fmt.Sprintf("%s?%s", url, r.Params)
 		}

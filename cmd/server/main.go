@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -55,8 +56,8 @@ func (s *server) root(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) start(ip, port string) {
-	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%s", ip, port))
+func (s *server) start(port string) {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -105,24 +106,42 @@ func (s *server) start(ip, port string) {
 	}
 }
 
-func (s *server) listenAndServe(addr string) {
-	addrSplit := strings.Split(addr, ":")
-	if len(addrSplit) != 2 {
-		log.Fatal("invalid addr for start Method")
-	}
-	ip := addrSplit[0]
-	port := addrSplit[1]
+func (s *server) listenAndServe(port string) {
+	go s.start(port)
+}
 
-	go s.start(ip, port)
+func checkFlags(tcpPort, httpPort, secret string) error {
+	err := []string{}
+	if len(tcpPort) == 0 {
+		err = append(err, "-tcpPort tag is mandatory")
+	}
+	if len(httpPort) == 0 {
+		err = append(err, "-httpPort tag is mandatory")
+	}
+	if len(secret) == 0 {
+		err = append(err, "-secret tag is mandatory")
+	}
+	if len(err) > 0 {
+		joined := strings.Join(err, ",\n")
+		return fmt.Errorf("%s%s", joined, ".\n\n type -h for help")
+	}
+	return nil
 }
 
 func main() {
+	secret := flag.String("secret", "", "the secret password")
+	tcpPort := flag.String("tcpPort", "", "the port used for the tcp server")
+	httpPort := flag.String("httpPort", "", "the port used for the http server")
+	flag.Parse()
+	if err := checkFlags(*tcpPort, *httpPort, *secret); err != nil {
+		log.Fatal(err)
+	}
 	mux := http.NewServeMux()
 	serv := server{
-		key:       "abcdef",
+		key:       *secret,
 		clientMap: sync.Map{},
 	}
-	serv.listenAndServe("127.0.0.1:9999")
+	serv.listenAndServe(*tcpPort)
 	mux.HandleFunc("/", serv.root)
-	http.ListenAndServe(":8888", mux)
+	http.ListenAndServe(fmt.Sprintf(":%s", *httpPort), mux)
 }
