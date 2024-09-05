@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"payproxy/internal"
 	"strings"
 	"time"
@@ -20,10 +21,15 @@ type subscribePayload struct {
 	Url string `json:"url"`
 }
 
-func errorHandler(err error) {
+func fatalHandler(err error) {
 	if err != nil {
-		log.Fatal(err)
+		printError(err)
+		os.Exit(1)
 	}
+}
+
+func printError(err error) {
+	log.Println("\033[0;31m" + err.Error() + "\033[0m")
 }
 
 func checkFlags(proxyServer, targetServer, trackPath, secret string) error {
@@ -54,27 +60,25 @@ func main() {
 	secret := flag.String("secret", "", "the proxy secret password")
 
 	flag.Parse()
-	if err := checkFlags(*proxyServer, *targetServer, *trackPath, *secret); err != nil {
-		log.Fatal(err)
-	}
+	err := checkFlags(*proxyServer, *targetServer, *trackPath, *secret)
+	fatalHandler(err)
 
 	for {
 		conn, err := net.Dial("tcp", *proxyServer)
 		if err != nil {
-			log.Println("proxy server unreachable, retry in 2sec")
+			log.Println("\033[0;33m proxy server unreachable, retry in 2sec\033[0m")
 			time.Sleep(time.Second * 2)
 			continue
 		}
 		defer conn.Close()
 
-		errorHandler(err)
+		fatalHandler(err)
 		sp := subscribePayload{Key: *secret, Url: *trackPath}
-		if err = json.NewEncoder(conn).Encode(sp); err != nil {
-			log.Fatal(err)
-		}
+		err = json.NewEncoder(conn).Encode(sp)
+		fatalHandler(err)
 
 		message, err := bufio.NewReader(conn).ReadString('\n')
-		errorHandler(err)
+		fatalHandler(err)
 		fmt.Println(message)
 
 		for {
@@ -82,12 +86,13 @@ func main() {
 
 			var r internal.Request
 			if err = json.NewDecoder(buf).Decode(&r); err != nil {
-				log.Println(err)
+				printError(err)
 				break
 			}
 
 			var buffer bytes.Buffer
-			log.Println(string(r.Body))
+			fmt.Println(string(r.Body))
+
 			buffer.Write(r.Body)
 			reader := io.Reader(&buffer)
 			url := fmt.Sprintf("%s%s", *targetServer, r.Url)
@@ -99,7 +104,7 @@ func main() {
 				url,
 				reader,
 			)
-			errorHandler(err)
+			fatalHandler(err)
 
 			for name, values := range r.Headers {
 				for _, value := range values {
@@ -108,9 +113,9 @@ func main() {
 			}
 
 			response, err := http.DefaultClient.Do(req)
-			errorHandler(err)
+			fatalHandler(err)
 			respByte, err := io.ReadAll(response.Body)
-			errorHandler(err)
+			fatalHandler(err)
 
 			log.Println(string(respByte))
 		}
