@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"payproxy/internal"
 	"strings"
+	"time"
 )
 
 type subscribePayload struct {
@@ -21,7 +22,7 @@ type subscribePayload struct {
 
 func errorHandler(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 
@@ -57,57 +58,61 @@ func main() {
 		log.Fatal(err)
 	}
 
-	conn, err := net.Dial("tcp", *proxyServer)
-	defer conn.Close()
-
-	errorHandler(err)
-	sp := subscribePayload{Key: *secret, Url: *trackPath}
-	if err = json.NewEncoder(conn).Encode(sp); err != nil {
-		log.Fatal(err)
-	}
-
-	message, err := bufio.NewReader(conn).ReadString('\n')
-	errorHandler(err)
-	fmt.Println(message)
-
 	for {
-		buf := bufio.NewReader(conn)
-
-		var r internal.Request
-		if err = json.NewDecoder(buf).Decode(&r); err != nil {
-			log.Fatal(err)
-		}
-
-		var buffer bytes.Buffer
-		buffer.Write(r.Body)
-		reader := io.Reader(&buffer)
-		url := fmt.Sprintf("%s%s", *targetServer, r.Url)
-		if len(r.Params) > 0 {
-			url = fmt.Sprintf("%s?%s", url, r.Params)
-		}
-		req, err := http.NewRequest(
-			r.Method,
-			url,
-			reader,
-		)
+		conn, err := net.Dial("tcp", *proxyServer)
 		if err != nil {
+			log.Println("proxy server unreachable, retry in 2sec")
+			time.Sleep(time.Second * 2)
+			continue
+		}
+		defer conn.Close()
+
+		errorHandler(err)
+		sp := subscribePayload{Key: *secret, Url: *trackPath}
+		if err = json.NewEncoder(conn).Encode(sp); err != nil {
 			log.Fatal(err)
 		}
 
-		for name, values := range r.Headers {
-			for _, value := range values {
-				req.Header.Add(name, value)
+		message, err := bufio.NewReader(conn).ReadString('\n')
+		errorHandler(err)
+		fmt.Println(message)
+
+		for {
+			buf := bufio.NewReader(conn)
+
+			var r internal.Request
+			if err = json.NewDecoder(buf).Decode(&r); err != nil {
+				log.Println(err)
+				break
 			}
-		}
 
-		response, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.Fatal(err)
+			var buffer bytes.Buffer
+			log.Println(string(r.Body))
+			buffer.Write(r.Body)
+			reader := io.Reader(&buffer)
+			url := fmt.Sprintf("%s%s", *targetServer, r.Url)
+			if len(r.Params) > 0 {
+				url = fmt.Sprintf("%s?%s", url, r.Params)
+			}
+			req, err := http.NewRequest(
+				r.Method,
+				url,
+				reader,
+			)
+			errorHandler(err)
+
+			for name, values := range r.Headers {
+				for _, value := range values {
+					req.Header.Add(name, value)
+				}
+			}
+
+			response, err := http.DefaultClient.Do(req)
+			errorHandler(err)
+			respByte, err := io.ReadAll(response.Body)
+			errorHandler(err)
+
+			log.Println(string(respByte))
 		}
-		respByte, err := io.ReadAll(response.Body)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println(string(respByte))
 	}
 }
