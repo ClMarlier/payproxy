@@ -69,13 +69,15 @@ func (s *server) start(port string) {
 			log.Println("client missconnected")
 		}
 		go func() {
-			buf := bufio.NewReader(conn)
+			buf := bufio.NewReader(io.LimitReader(conn, 1024))
 			channel := make(broadcastChan)
 
 			// Authorization
 			var sp subscribePayload
 			if err = json.NewDecoder(buf).Decode(&sp); err != nil {
-				log.Fatal(err)
+				log.Println(err)
+				conn.Close()
+				return
 			}
 			if sp.Key == s.key {
 				conn.Write([]byte("success\n"))
@@ -98,7 +100,7 @@ func (s *server) start(port string) {
 			for {
 				select {
 				case req := <-channel:
-					fmt.Println(req)
+					log.Println(req)
 					json.NewEncoder(conn).Encode(req)
 				}
 			}
